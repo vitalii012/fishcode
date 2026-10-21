@@ -1,6 +1,4 @@
 // Copyright © 2026, Vitalii Tarasenko. All rights reserved.
-// Use of this source code is governed by a BSD-style license (BSD 3-Clause)
-// that can be found in the LICENSE file.
 
 package main
 
@@ -9,19 +7,31 @@ import (
 	"errors"
 	"flag"
 	"fmt"
-	"io"
 	"os"
 
 	"golang.org/x/term"
 
 	"github.com/vitalii012/fishcode/internal/crypto"
-	"github.com/vitalii012/fishcode/internal/fileutils"
+	"github.com/vitalii012/fishcode/internal/io"
 	"github.com/vitalii012/fishcode/internal/utils"
 )
 
 type command struct {
 	input, output, mode string
 }
+
+type message struct {
+	block         []byte
+	total, number uint
+}
+
+type status struct {
+	job     string
+	percent uint
+}
+
+const blockSize = uint(1024) // 1 KiB
+const nonceSize = uint(28)   // 28 B
 
 func main() {
 	var err error
@@ -43,25 +53,25 @@ func main() {
 		fmt.Println("Note: use fishcode <command> [-h] to see sub-command manuals.")
 	}
 
-	var inputFile *os.File
+	var in io.InputFile
 
-	if inputFile, err = os.Open(cmd.input); err != nil {
+	if in, err = io.OpenInputFile(cmd.input); err != nil {
 		panic(err)
 	}
 
-	defer inputFile.Close()
+	defer in.Close()
 
 	pwd := readPassword(cmd.mode)
 
 	defer pwd.Cleanup()
 
-	var outputFile *os.File
+	var out io.OutputFile
 
-	if outputFile, err = os.Create(cmd.output); err != nil {
+	if out, err = io.CreateOutputFile(cmd.output); err != nil {
 		panic(err)
 	}
 
-	defer outputFile.Close()
+	defer out.Close()
 
 	var key crypto.Key
 
@@ -69,22 +79,16 @@ func main() {
 
 	if cmd.mode == "lock" {
 		key.Generate(pwd)
+
+		if err = out.StoreSalt(key.GetSalt()); err != nil {
+			panic(err)
+		}
 	} else {
-		if key.Salt, key.Tag, err = fileutils.LoadKeySupplements(inputFile); err != nil {
-			panic(err)
-		}
+		var salt [32]byte
 
-		key.Derive(pwd)
-	}
+		in.LoadSalt(salt[:])
 
-	if cmd.mode == "lock" {
-		if err = fileutils.StoreKeySupplements(outputFile, key.Salt, key.Tag); err != nil {
-			panic(err)
-		}
-
-		if err = outputFile.Sync(); err != nil {
-			panic(err)
-		}
+		key.Derive(pwd, salt)
 	}
 
 	var cip crypto.Cipher
@@ -93,56 +97,61 @@ func main() {
 		panic(err)
 	}
 
-	if cmd.mode == "lock" {
-		fmt.Print("Encryption...")
-	} else {
-		fmt.Print("Decryption...")
-	}
-
-	inputChan := make(chan []byte, 10)
+	inputChan := make(chan message, 10)
 
 	go func() {
 		defer close(inputChan)
 
-		var msg []byte
-		var num int
-		var err error
+		var msg message
 
-		for {
+		var bytesLeft uint
+
+		if fileSize, err := in.GetSize(); err == nil {
+			msg.total = uint(fileSize) / blockSize
+			bytesLeft = uint(fileSize) % blockSize
+		}
+
+		for msg.number < msg.total {
 			if cmd.mode == "lock" {
-				msg = make([]byte, 1*1024*1024)
+				msg.block = make([]byte, blockSize)
 			} else {
-				msg = make([]byte, 1*1024*1024+28)
+				msg.block = make([]byte, blockSize+nonceSize)
 			}
 
-			if num, err = inputFile.Read(msg); err != nil {
-				break
-			} else {
-				inputChan <- msg[:num]
+			if err = in.Read(msg.block); err != nil {
+				panic(err)
 			}
+
+			msg.number++
+
+			inputChan <- msg
 		}
 
-		if err != io.EOF {
-			panic(err)
-		}
+		if bytesLeft > 0 {
+			if cmd.mode == "lock" {
+				msg.block = make([]byte, bytesLeft)
+			} else {
+				msg.block = make([]byte, bytesLeft+nonceSize)
+			}
 
-		if num > 0 {
-			inputChan <- msg[:num]
+			if err = in.Read(msg.block); err != nil {
+				panic(err)
+			}
+
+			inputChan <- msg
 		}
 	}()
 
-	cipherChan := make(chan []byte, 10)
+	cipherChan := make(chan message, 10)
 
 	go func() {
 		defer close(cipherChan)
 
-		var err error
-
 		for msg := range inputChan {
 			if cmd.mode == "lock" {
-				msg = cip.Lock(msg)
+				msg.block = cip.Lock(msg.block)
 			} else {
-				if msg, err = cip.Unlock(msg); err != nil {
+				if msg.block, err = cip.Unlock(msg.block); err != nil {
 					panic(err)
 				}
 			}
@@ -151,17 +160,57 @@ func main() {
 		}
 	}()
 
+	var sts status
+
+	if cmd.mode == "lock" {
+		sts.job = "Locking"
+	} else {
+		sts.job = "Unlocking"
+	}
+
+	stsText := fmt.Sprintf(
+		"\r%s: %s \u2192 %s: %d%%",
+		sts.job,
+		cmd.input,
+		cmd.output,
+		sts.percent,
+	)
+
+	fmt.Print(stsText)
+
 	for msg := range cipherChan {
-		if _, err := outputFile.Write(msg); err != nil {
+		if err := out.Write(msg.block); err != nil {
 			panic(err)
+		}
+
+		percent := (msg.number * 100) / msg.total
+
+		if percent > sts.percent {
+			sts.percent = percent
+
+			stsText = fmt.Sprintf(
+				"\r%s: %s \u2192 %s: %d%%",
+				sts.job,
+				cmd.input,
+				cmd.output,
+				sts.percent,
+			)
+
+			fmt.Print(stsText)
 		}
 	}
 
-	if err = outputFile.Sync(); err != nil {
+	if err = out.Sync(); err != nil {
 		panic(err)
 	}
 
-	fmt.Println("done!")
+	fmt.Print("\r")
+
+	for idx := 0; idx < len(stsText); idx++ {
+		fmt.Print(" ")
+	}
+
+	fmt.Println("\rDone!")
 }
 
 func parseCommand(words []string) (command, error) {
@@ -210,12 +259,12 @@ func readPassword(mode string) crypto.Password {
 
 	if pdata, err := term.ReadPassword(int(os.Stdin.Fd())); err == nil {
 		defer func() {
-			for idx, _ := range pdata {
+			for idx := range pdata {
 				pdata[idx] = 0
 			}
 		}()
 
-		fmt.Println("")
+		fmt.Print("\r")
 
 		if err := utils.VerifyRawPassword(pdata); err != nil {
 			fmt.Fprintf(os.Stderr, "%s\n", err)
@@ -239,7 +288,7 @@ func readPassword(mode string) crypto.Password {
 				panic(err)
 			}
 
-			fmt.Println("")
+			fmt.Print("\r")
 		}
 
 		return crypto.NewPassword(pdata)
