@@ -1,3 +1,5 @@
+// Copyright © 2026, Vitalii Tarasenko. All rights reserved.
+
 package utils
 
 import "errors"

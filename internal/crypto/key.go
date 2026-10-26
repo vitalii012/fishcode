@@ -1,3 +1,5 @@
+// Copyright © 2026, Vitalii Tarasenko. All rights reserved.
+
 package crypto
 
 import (
@@ -14,6 +16,10 @@ type Key struct {
 
 func (key *Key) GetSalt() []byte {
 	return bytes.Clone(key.salt[:])
+}
+
+func (key *Key) GetSize() uint {
+	return uint(len(key.data))
 }
 
 func (key *Key) Generate(pwd Password) (err error) {

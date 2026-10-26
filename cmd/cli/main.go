@@ -30,8 +30,8 @@ type status struct {
 	percent uint
 }
 
-const blockSize = uint(1024) // 1 KiB
-const nonceSize = uint(28)   // 28 B
+const blockSize = uint(1024)  // 1 KiB
+const overheadSize = uint(28) // 28 B
 
 func main() {
 	var err error
@@ -93,6 +93,8 @@ func main() {
 
 	var cip crypto.Cipher
 
+	defer cip.Cleanup()
+
 	if cip, err = crypto.InitCipher(pwd, &key); err != nil {
 		panic(err)
 	}
@@ -104,19 +106,20 @@ func main() {
 
 		var msg message
 
+		fileSize := in.GetSize()
+
 		var bytesLeft uint
 
-		if fileSize, err := in.GetSize(); err == nil {
+		if cmd.mode == "lock" {
 			msg.total = uint(fileSize) / blockSize
 			bytesLeft = uint(fileSize) % blockSize
+		} else {
+			msg.total = (uint(fileSize) - key.GetSize()) / (blockSize + overheadSize)
+			bytesLeft = (uint(fileSize) - key.GetSize()) % (blockSize + overheadSize)
 		}
 
-		for msg.number < msg.total {
-			if cmd.mode == "lock" {
-				msg.block = make([]byte, blockSize)
-			} else {
-				msg.block = make([]byte, blockSize+nonceSize)
-			}
+		readProcedure := func(chunkSize uint) {
+			msg.block = make([]byte, chunkSize)
 
 			if err = in.Read(msg.block); err != nil {
 				panic(err)
@@ -127,18 +130,22 @@ func main() {
 			inputChan <- msg
 		}
 
-		if bytesLeft > 0 {
+		for msg.number < msg.total {
 			if cmd.mode == "lock" {
-				msg.block = make([]byte, bytesLeft)
+				readProcedure(blockSize)
 			} else {
-				msg.block = make([]byte, bytesLeft+nonceSize)
+				readProcedure(blockSize + overheadSize)
 			}
+		}
 
-			if err = in.Read(msg.block); err != nil {
-				panic(err)
+		if bytesLeft > 0 {
+			msg.total++
+
+			if cmd.mode == "lock" {
+				readProcedure(bytesLeft)
+			} else {
+				readProcedure(bytesLeft + overheadSize)
 			}
-
-			inputChan <- msg
 		}
 	}()
 

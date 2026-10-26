@@ -1,3 +1,5 @@
+// Copyright © 2026, Vitalii Tarasenko. All rights reserved.
+
 package crypto
 
 import (
@@ -6,9 +8,9 @@ import (
 )
 
 type Cipher struct {
-	block  cipher.Block
-	aesGCM cipher.AEAD
-	key    *Key
+	block cipher.Block
+	aead  cipher.AEAD
+	key   *Key
 }
 
 func InitCipher(pwd Password, key *Key) (cip Cipher, err error) {
@@ -16,7 +18,7 @@ func InitCipher(pwd Password, key *Key) (cip Cipher, err error) {
 		return cip, err
 	}
 
-	if cip.aesGCM, err = cipher.NewGCMWithRandomNonce(cip.block); err != nil {
+	if cip.aead, err = cipher.NewGCMWithRandomNonce(cip.block); err != nil {
 		return cip, err
 	}
 
@@ -26,11 +28,11 @@ func InitCipher(pwd Password, key *Key) (cip Cipher, err error) {
 }
 
 func (cip *Cipher) Lock(input []byte) []byte {
-	return cip.aesGCM.Seal(nil, make([]byte, 0), input, nil)
+	return cip.aead.Seal(nil, nil, input, nil)
 }
 
 func (cip *Cipher) Unlock(input []byte) (output []byte, err error) {
-	if output, err = cip.aesGCM.Open(nil, make([]byte, 0), input, nil); err != nil {
+	if output, err = cip.aead.Open(nil, nil, input, nil); err != nil {
 		return output, err
 	}
 

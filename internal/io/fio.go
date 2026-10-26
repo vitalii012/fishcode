@@ -1,13 +1,15 @@
+// Copyright © 2026, Vitalii Tarasenko. All rights reserved.
+
 package io
 
 import (
-	"io"
 	"os"
 )
 
 type InputFile struct {
 	path   string
 	handle *os.File
+	info   os.FileInfo
 }
 
 type OutputFile struct {
@@ -22,6 +24,11 @@ func OpenInputFile(path string) (in InputFile, err error) {
 		return InputFile{path: path, handle: nil}, err
 	}
 
+	if in.info, err = in.handle.Stat(); err != nil {
+		in.Close()
+		return InputFile{path: path, handle: nil}, err
+	}
+
 	return in, nil
 }
 
@@ -31,16 +38,8 @@ func (in *InputFile) Close() {
 	}
 }
 
-func (in *InputFile) GetSize() (size int64, err error) {
-	if size, err = in.handle.Seek(0, io.SeekEnd); err != nil {
-		return 0, err
-	}
-
-	if _, err = in.handle.Seek(0, io.SeekStart); err != nil {
-		return size, err
-	}
-
-	return size, nil
+func (in *InputFile) GetSize() int64 {
+	return in.info.Size()
 }
 
 func (in *InputFile) LoadSalt(salt []byte) (err error) {
