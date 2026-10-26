@@ -51,6 +51,7 @@ func main() {
 		fmt.Println("\t<unlock> - make plaintext from [-in] file")
 		fmt.Printf("\t<help> - print this dialog\n\n")
 		fmt.Println("Note: use fishcode <command> [-h] to see sub-command manuals.")
+		return
 	}
 
 	var in io.InputFile
@@ -140,12 +141,7 @@ func main() {
 
 		if bytesLeft > 0 {
 			msg.total++
-
-			if cmd.mode == "lock" {
-				readProcedure(bytesLeft)
-			} else {
-				readProcedure(bytesLeft + overheadSize)
-			}
+			readProcedure(bytesLeft)
 		}
 	}()
 
@@ -159,7 +155,8 @@ func main() {
 				msg.block = cip.Lock(msg.block)
 			} else {
 				if msg.block, err = cip.Unlock(msg.block); err != nil {
-					panic(err)
+					fmt.Fprintf(os.Stderr, "\rError: invalid password or corrupted input file!\n")
+					os.Exit(2)
 				}
 			}
 
@@ -274,8 +271,8 @@ func readPassword(mode string) crypto.Password {
 		fmt.Print("\r")
 
 		if err := utils.VerifyRawPassword(pdata); err != nil {
-			fmt.Fprintf(os.Stderr, "%s\n", err)
-			os.Exit(2)
+			fmt.Fprintf(os.Stderr, "\rError: %s!\n", err)
+			os.Exit(3)
 		}
 
 		if mode == "lock" {
@@ -283,13 +280,13 @@ func readPassword(mode string) crypto.Password {
 
 			if pdata2, err := term.ReadPassword(int(os.Stdin.Fd())); err == nil {
 				if err := utils.VerifyRawPassword(pdata2); err != nil {
-					fmt.Fprintf(os.Stderr, "%s\n", err)
-					os.Exit(3)
+					fmt.Fprintf(os.Stderr, "\rError: %s!\n", err)
+					os.Exit(4)
 				}
 
 				if !bytes.Equal(pdata, pdata2) {
-					fmt.Fprintf(os.Stderr, "\nError: passwords don't match!\n")
-					os.Exit(4)
+					fmt.Fprintf(os.Stderr, "\rError: passwords don't match!\n")
+					os.Exit(5)
 				}
 			} else {
 				panic(err)
