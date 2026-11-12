@@ -1,3 +1,6 @@
 # Executable files (Linux, macOS, Windows).
 fishcode
 fishcode.exe
+
+# Directory for release builds.
+releases/
