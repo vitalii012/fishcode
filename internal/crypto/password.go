@@ -2,14 +2,12 @@
 
 package crypto
 
-import "bytes"
-
 type Password struct {
 	data []byte
 }
 
-func NewPassword(newData []byte) Password {
-	return Password{data: bytes.Clone(newData)}
+func NewPassword(data []byte) *Password {
+	return &Password{data}
 }
 
 func (pwd *Password) Cleanup() {

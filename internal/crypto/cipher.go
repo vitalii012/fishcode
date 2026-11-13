@@ -13,7 +13,7 @@ type Cipher struct {
 	key   *Key
 }
 
-func InitCipher(pwd Password, key *Key) (cip Cipher, err error) {
+func InitCipher(pwd *Password, key *Key) (cip Cipher, err error) {
 	if cip.block, err = aes.NewCipher(key.data); err != nil {
 		return cip, err
 	}

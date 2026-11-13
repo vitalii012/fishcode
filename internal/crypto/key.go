@@ -22,7 +22,7 @@ func (key *Key) GetSize() uint {
 	return uint(len(key.data))
 }
 
-func (key *Key) Generate(pwd Password) (err error) {
+func (key *Key) Generate(pwd *Password) (err error) {
 	rand.Read(key.salt[:])
 
 	if key.data, err = pbkdf2.Key(sha256.New, string(pwd.data), key.salt[:], 4096, 32); err != nil {
@@ -32,7 +32,7 @@ func (key *Key) Generate(pwd Password) (err error) {
 	return nil
 }
 
-func (key *Key) Derive(pwd Password, salt [32]byte) (err error) {
+func (key *Key) Derive(pwd *Password, salt [32]byte) (err error) {
 	key.salt = salt
 
 	if key.data, err = pbkdf2.Key(sha256.New, string(pwd.data), salt[:], 4096, 32); err == nil {
