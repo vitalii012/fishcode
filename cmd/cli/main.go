@@ -62,7 +62,21 @@ func main() {
 
 	defer in.Close()
 
-	pwd := readPassword(cmd.mode)
+	var pwdData []byte
+
+	if cmd.mode == "lock" {
+		if pwdData, err = readPassword(false); err != nil {
+			fmt.Fprintf(os.Stderr, "\r%s\n", err.Error())
+			os.Exit(2)
+		}
+	} else {
+		if pwdData, err = readPassword(true); err != nil {
+			fmt.Fprintf(os.Stderr, "\r%s\n", err.Error())
+			os.Exit(3)
+		}
+	}
+
+	pwd := crypto.NewPassword(pwdData)
 
 	defer pwd.Cleanup()
 
@@ -220,83 +234,74 @@ func main() {
 func parseCommand(words []string) (command, error) {
 	var cmd command
 
-	if len(words) == 1 {
+	if len(words) < 2 {
 		return cmd, errors.New("command was not specified")
 	}
 
+	cmd.mode = words[1]
+
 	switch words[1] {
 	case "lock":
-		cmd.mode = words[1]
-
 		fset := flag.NewFlagSet("lock", flag.ExitOnError)
 		fset.StringVar(&cmd.input, "in", "", "file with plaintext")
 		fset.StringVar(&cmd.output, "out", "ciphertext.bin", "file to store ciphertext")
 
 		fset.Parse(words[2:])
 	case "unlock":
-		cmd.mode = words[1]
-
 		fset := flag.NewFlagSet("unlock", flag.ExitOnError)
 		fset.StringVar(&cmd.input, "in", "", "file with ciphertext")
 		fset.StringVar(&cmd.output, "out", "plaintext.bin", "file to store plaintext")
 
 		fset.Parse(words[2:])
 	case "help":
-		if len(words) != 2 {
-			return cmd, errors.New("invalid usage")
+		if len(words) > 2 {
+			return cmd, errors.New("too many arguments")
 		}
-
-		cmd.mode = words[1]
 	default:
-		return cmd, errors.New("invalid command")
+		return command{}, errors.New("invalid command")
 	}
 
-	if cmd.input == "" {
-		return cmd, errors.New("input file was not specified")
+	if len(words) > 6 {
+		return command{"", "", cmd.mode}, errors.New("too many arguments")
+	}
+
+	if cmd.mode != "help" && cmd.input == "" {
+		return command{"", "", cmd.mode}, errors.New("input file was not specified")
 	}
 
 	return cmd, nil
 }
 
-func readPassword(mode string) crypto.Password {
+func readPassword(retype bool) (data []byte, err error) {
 	fmt.Print("Password: ")
 
-	if pdata, err := term.ReadPassword(int(os.Stdin.Fd())); err == nil {
-		defer func() {
-			for idx := range pdata {
-				pdata[idx] = 0
-			}
-		}()
-
-		fmt.Print("\r")
-
-		if err := utils.VerifyRawPassword(pdata); err != nil {
-			fmt.Fprintf(os.Stderr, "\rError: %s!\n", err)
-			os.Exit(3)
-		}
-
-		if mode == "lock" {
-			fmt.Print("Retype password: ")
-
-			if pdata2, err := term.ReadPassword(int(os.Stdin.Fd())); err == nil {
-				if err := utils.VerifyRawPassword(pdata2); err != nil {
-					fmt.Fprintf(os.Stderr, "\rError: %s!\n", err)
-					os.Exit(4)
-				}
-
-				if !bytes.Equal(pdata, pdata2) {
-					fmt.Fprintf(os.Stderr, "\rError: passwords don't match!\n")
-					os.Exit(5)
-				}
-			} else {
-				panic(err)
-			}
-
-			fmt.Print("\r")
-		}
-
-		return crypto.NewPassword(pdata)
-	} else {
-		panic(err)
+	if data, err = term.ReadPassword(int(os.Stdin.Fd())); err != nil {
+		return nil, err
 	}
+
+	if err = utils.VerifyRawPassword(data); err != nil {
+		return data, err
+	}
+
+	if retype {
+		fmt.Print("\rRetype password: ")
+
+		var data2 []byte
+
+		if data2, err = term.ReadPassword(int(os.Stdin.Fd())); err != nil {
+			return nil, err
+		}
+
+		if err = utils.VerifyRawPassword(data2); err != nil {
+			return data2, err
+		}
+
+		if !bytes.Equal(data, data2) {
+			return data2, errors.New("passwords don't match")
+		}
+	}
+
+	fmt.Print("\r")
+
+	return data, nil
 }
